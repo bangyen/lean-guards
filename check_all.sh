@@ -20,8 +20,11 @@ if [[ -f .guards.env ]]; then
     set +a
 fi
 
-# Keep format check last so style fixes do not hide earlier semantic failures.
+# Config check first: a typo there would otherwise leave the guards below
+# running on defaults. Format check last, so style fixes do not hide earlier
+# semantic failures.
 SCRIPTS=(
+    "check_config.sh"
     "check_banned.sh"
     "check_import.sh"
     "check_simp.sh"

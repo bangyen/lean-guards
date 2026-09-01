@@ -8,7 +8,8 @@ its own *thresholds* in a `.guards.env` file at its root.
 
 | Script | Enforces |
 | --- | --- |
-| `check_banned.sh` | No banned tactics or constructs |
+| `check_config.sh` | `.guards.env` names real settings with valid values |
+| `check_banned.sh` | No banned tactics, kernel-trust escapes, or bypass markers |
 | `check_import.sh` | Every folder aggregator imports its direct children |
 | `check_simp.sh` | `simp` usage follows project conventions |
 | `check_copyright.sh` | Copyright headers present |
@@ -18,8 +19,10 @@ its own *thresholds* in a `.guards.env` file at its root.
 | `check_naming.sh` | Naming conventions |
 | `format_lean.sh` | Formatting (`--check` to verify without writing) |
 
-`check_all.sh` runs them all in order, stopping at the first failure. Format
-checking runs last so style fixes cannot mask earlier semantic failures.
+`check_all.sh` runs them all in order, stopping at the first failure. The
+config check runs first, since a typo there would leave every later guard on
+its default threshold; format checking runs last, so style fixes cannot mask
+earlier semantic failures.
 
 ## Use as a submodule
 
@@ -71,7 +74,7 @@ because every guard discovers files through `git grep` or `git ls-files`.
 A rejection case asserts on the guard's message, not just its exit code — a
 guard failing for an unrelated reason still exits non-zero.
 
-All ten guards are covered. Guards whose failure is gated behind a threshold
+All eleven guards are covered. Guards whose failure is gated behind a threshold
 (`check_long_file`, `check_proof_length`) are tested from both sides — the same
 fixture passing under a high cap and failing under a low one, which shows the
 thresholds are honoured rather than merely accepted.

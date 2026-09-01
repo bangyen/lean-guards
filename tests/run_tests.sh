@@ -9,6 +9,10 @@
 
 set -uo pipefail
 
+# Without this, a call to a helper that does not exist yet (say, defined further
+# down the file) prints "command not found" and the suite still reports success.
+trap 'echo "FATAL: unexpected error on line $LINENO"; exit 1' ERR
+
 GUARDS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PASS=0
 FAIL=0
@@ -145,6 +149,28 @@ expect_accept() {
         PASS=$((PASS + 1))
     fi
     GUARD_ENV=()
+}
+
+# check_config validates .guards.env rather than Lean sources, so it gets a
+# repository holding that file instead of a fixture module.
+expect_config() {
+    local name="$1" outcome="$2" needle="$3" body="$4"
+    local dir out code
+    dir="$(mktemp -d)"
+    printf '%s\n' "$body" > "$dir/.guards.env"
+    out="$(cd "$dir" && "$GUARDS_DIR/check_config.sh" 2>&1)"
+    code=$?
+    rm -rf "$dir"
+
+    if [[ "$outcome" == reject && $code -eq 0 ]]; then
+        FAIL=$((FAIL + 1)); FAILURES+=("$name: expected check_config.sh to reject, but it passed")
+    elif [[ "$outcome" == reject ]] && ! grep -qF "$needle" <<< "$out"; then
+        FAIL=$((FAIL + 1)); FAILURES+=("$name: check_config.sh rejected, but not for the expected reason (wanted \"$needle\")")
+    elif [[ "$outcome" == accept && $code -ne 0 ]]; then
+        FAIL=$((FAIL + 1)); FAILURES+=("$name: expected check_config.sh to accept, but it rejected:"$'\n'"$out")
+    else
+        PASS=$((PASS + 1))
+    fi
 }
 
 # --- check_banned -----------------------------------------------------------
@@ -298,6 +324,47 @@ expect_accept_multi "import/aggregator complete" check_import.sh \
 expect_reject_multi "import/aggregator absent" check_import.sh "Missing aggregator file" \
     Fixture.lean 'import Fixture.Sub.Leaf' \
     Fixture/Sub/Leaf.lean 'theorem t : True := trivial'
+
+# --- check_banned word boundaries -------------------------------------------
+
+# Bare substrings fired on ordinary names containing a banned word. These pin
+# the boundary behaviour so the false positives cannot return.
+expect_accept "banned/partialOrder is not partial" check_banned.sh Fixture/A.lean \
+'def partialOrderThing : Nat := 0'
+
+expect_accept "banned/axiomatic is not axiom" check_banned.sh Fixture/A.lean \
+'def axiomaticFoo : Nat := 0'
+
+expect_reject "banned/real partial still caught" check_banned.sh "banned pattern: partial" Fixture/A.lean \
+'partial def loop : Nat -> Nat := fun n => loop n'
+
+expect_reject "banned/native_decide" check_banned.sh "native_decide" Fixture/A.lean \
+'theorem t : True := by native_decide'
+
+expect_reject "banned/extern" check_banned.sh "extern" Fixture/A.lean \
+'@[extern "c_impl"] def f : Nat := 0'
+
+# --- check_config -----------------------------------------------------------
+
+expect_config "config/valid" accept "" \
+'MAX_LEAN_FILE_LINES=700
+SOFT_LEAN_FILE_MAX_LINES=400'
+
+# The bug this guard exists for: a misspelled name is ignored when sourced, so
+# the repository silently runs on the default limit.
+expect_config "config/unknown setting" reject "unknown setting" \
+'MAX_LEAN_FILE_LINE=700'
+
+expect_config "config/non-integer" reject "must be a non-negative integer" \
+'MAX_LEAN_FILE_LINES=lots'
+
+expect_config "config/soft above hard" reject "must be below MAX_LEAN_FILE_LINES" \
+'MAX_LEAN_FILE_LINES=100
+SOFT_LEAN_FILE_MAX_LINES=200'
+
+expect_config "config/malformed line" reject "not a NAME=VALUE" \
+'this is not an assignment'
+
 
 # --- summary ----------------------------------------------------------------
 
