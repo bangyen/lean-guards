@@ -74,7 +74,9 @@ because every guard discovers files through `git grep` or `git ls-files`.
 A rejection case asserts on the guard's message, not just its exit code — a
 guard failing for an unrelated reason still exits non-zero.
 
-All eleven guards are covered. Guards whose failure is gated behind a threshold
+All eleven guards are covered. The header `check_copyright` expects is compared
+exactly, so bumping `COPYRIGHT_YEAR` means rewriting the header in every file —
+deliberate, since a header is either canonical or it is not. Guards whose failure is gated behind a threshold
 (`check_long_file`, `check_proof_length`) are tested from both sides — the same
 fixture passing under a high cap and failing under a low one, which shows the
 thresholds are honoured rather than merely accepted.
@@ -118,6 +120,9 @@ requests only `contents: read`.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `LEAN_SEARCH_ROOTS` | `lean_lib` names in `lakefile.toml` | Directories to scan |
+| `COPYRIGHT_HOLDER` | Bangyen Pham | Name in the copyright and Authors lines |
+| `COPYRIGHT_YEAR` | 2026 | Year in the copyright line |
+| `COPYRIGHT_LICENSE` | Apache 2.0 | License phrase in the header |
 | `MAX_LEAN_FILE_LINES` | 250 | Hard file-length cap (fails) |
 | `SOFT_LEAN_FILE_MAX_LINES` | 200 | Advisory file-length cap (warns) |
 | `SOFT_LEAN_FILE_MIN_LINES` | 25 | Advisory file-length floor (warns) |

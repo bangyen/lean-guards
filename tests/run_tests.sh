@@ -366,6 +366,49 @@ expect_config "config/malformed line" reject "not a NAME=VALUE" \
 'this is not an assignment'
 
 
+# --- check_copyright parameterization ---------------------------------------
+
+OTHER_HEADER='/-
+Copyright (c) 2030 Ada Lovelace. All rights reserved.
+Released under MIT license as described in the file LICENSE.
+Authors: Ada Lovelace
+-/
+
+theorem t : True := trivial'
+
+# The holder and year were hardcoded, so the guard only ever worked for one
+# repository. Under a matching config another project's header is canonical.
+GUARD_ENV=(COPYRIGHT_HOLDER="Ada Lovelace" COPYRIGHT_YEAR=2030 COPYRIGHT_LICENSE=MIT)
+expect_accept "copyright/other holder configured" check_copyright.sh Fixture/A.lean \
+"$OTHER_HEADER"
+
+# The same file must still fail under the defaults.
+expect_reject "copyright/other holder unconfigured" check_copyright.sh "copyright header" Fixture/A.lean \
+"$OTHER_HEADER"
+
+GUARD_ENV=(COPYRIGHT_YEAR=99)
+expect_reject "copyright/bad year value" check_copyright.sh "four-digit year" Fixture/A.lean \
+"$CANONICAL_HEADER
+
+theorem t : True := trivial"
+
+# --- check_config: non-integer settings --------------------------------------
+
+expect_config "config/copyright settings valid" accept "" \
+'COPYRIGHT_HOLDER=Ada Lovelace
+COPYRIGHT_YEAR=2030'
+
+expect_config "config/bad copyright year" reject "four-digit year" \
+'COPYRIGHT_YEAR=20'
+
+expect_config "config/empty holder" reject "must not be empty" \
+'COPYRIGHT_HOLDER='
+
+# A root that does not exist makes every guard scan nothing and pass, which is
+# indistinguishable from a clean repository.
+expect_config "config/nonexistent search root" reject "not a directory" \
+'LEAN_SEARCH_ROOTS=NoSuchDir'
+
 # --- summary ----------------------------------------------------------------
 
 echo

@@ -2,12 +2,30 @@
 
 # Check that all Lean files start with the required copyright header block.
 # This script fails if any file has a missing or non-standard header.
+#
+# Environment variables:
+# - COPYRIGHT_HOLDER: name in the copyright and Authors lines (default: Bangyen Pham)
+# - COPYRIGHT_YEAR: year in the copyright line (default: 2026)
+# - COPYRIGHT_LICENSE: license phrase (default: Apache 2.0)
+#
+# The header is compared exactly, so bumping the year means rewriting it in
+# every file. That is the intended strictness: the header is either canonical
+# or it is not.
 
-EXPECTED_HEADER="$(cat <<'EOF'
+COPYRIGHT_HOLDER="${COPYRIGHT_HOLDER:-Bangyen Pham}"
+COPYRIGHT_YEAR="${COPYRIGHT_YEAR:-2026}"
+COPYRIGHT_LICENSE="${COPYRIGHT_LICENSE:-Apache 2.0}"
+
+if ! [[ "$COPYRIGHT_YEAR" =~ ^[0-9]{4}$ ]]; then
+    echo "ERROR: COPYRIGHT_YEAR must be a four-digit year, got '${COPYRIGHT_YEAR}'."
+    exit 1
+fi
+
+EXPECTED_HEADER="$(cat <<EOF
 /-
-Copyright (c) 2026 Bangyen Pham. All rights reserved.
-Released under Apache 2.0 license as described in the file LICENSE.
-Authors: Bangyen Pham
+Copyright (c) ${COPYRIGHT_YEAR} ${COPYRIGHT_HOLDER}. All rights reserved.
+Released under ${COPYRIGHT_LICENSE} license as described in the file LICENSE.
+Authors: ${COPYRIGHT_HOLDER}
 -/
 EOF
 )"

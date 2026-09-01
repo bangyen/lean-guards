@@ -28,6 +28,9 @@ KNOWN=(
     HARD_PROOF_MAX_LINES
     SOFT_PROOF_MIN_LINES
     SOFT_PROOF_MAX_LINES
+    COPYRIGHT_HOLDER
+    COPYRIGHT_YEAR
+    COPYRIGHT_LICENSE
 )
 
 INTEGER_VARS=(
@@ -73,6 +76,31 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 
     if contains "$name" "${INTEGER_VARS[@]}" && ! [[ "$value" =~ ^[0-9]+$ ]]; then
         MATCHES+=("${CONFIG_FILE}:${lineno}: ${name} must be a non-negative integer, got '${value}'")
+    fi
+
+    # The non-integer settings previously passed unchecked, so a typo here was
+    # silently accepted and then quietly did the wrong thing.
+    if [[ "$name" == COPYRIGHT_YEAR ]] && ! [[ "$value" =~ ^[0-9]{4}$ ]]; then
+        MATCHES+=("${CONFIG_FILE}:${lineno}: COPYRIGHT_YEAR must be a four-digit year, got '${value}'")
+    fi
+
+    if [[ "$name" == COPYRIGHT_HOLDER || "$name" == COPYRIGHT_LICENSE ]] && [[ -z "${value//[[:space:]]/}" ]]; then
+        MATCHES+=("${CONFIG_FILE}:${lineno}: ${name} must not be empty")
+    fi
+
+    # A root that is not a directory means the guards scan nothing and pass
+    # vacuously, which looks identical to a clean repository.
+    if [[ "$name" == LEAN_SEARCH_ROOTS ]]; then
+        if [[ -z "${value//[[:space:]]/}" ]]; then
+            MATCHES+=("${CONFIG_FILE}:${lineno}: LEAN_SEARCH_ROOTS must not be empty")
+        else
+            read -r -a roots <<< "$value"
+            for root in "${roots[@]}"; do
+                if [[ ! -d "$root" ]]; then
+                    MATCHES+=("${CONFIG_FILE}:${lineno}: LEAN_SEARCH_ROOTS names '${root}', which is not a directory")
+                fi
+            done
+        fi
     fi
 done < "$CONFIG_FILE"
 
