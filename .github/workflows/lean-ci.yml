@@ -1,0 +1,48 @@
+# Shared CI for the Lean projects that vendor these guard scripts.
+#
+# Callers reference this at a pinned ref, so a change here does not reach any
+# repository until that repository moves its ref:
+#
+#   jobs:
+#     build:
+#       uses: bangyen/lean-guards/.github/workflows/lean-ci.yml@<ref>
+#
+# The checkout below runs in the caller's context: it checks out the calling
+# repository and the scripts submodule at whatever commit that repository pins.
+
+name: Lean CI
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: "Runner label for the build job."
+        type: string
+        default: ubuntu-latest
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runs-on }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          submodules: true
+
+      - name: Build Lean project
+        uses: leanprover/lean-action@v1
+
+      - name: Enforce warning-free Lean build
+        run: lake --wfail build
+
+      - name: Run the linter
+        run: lake lint
+
+      - name: Run guard checks
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/check_all.sh

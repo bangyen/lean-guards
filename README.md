@@ -54,6 +54,35 @@ git add scripts && git commit -m "chore: bump lean-guards"
 The submodule is pinned to a commit, so upstream changes never reach a
 repository until that bump lands.
 
+## Shared CI workflow
+
+`.github/workflows/lean-ci.yml` is a reusable workflow (`workflow_call`) that
+builds a consuming repository, enforces a warning-free build, runs `lake lint`,
+and runs the guards. Callers reduce to a stub:
+
+```yaml
+name: Lean Action CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    uses: bangyen/lean-guards/.github/workflows/lean-ci.yml@v1
+```
+
+Pin the ref. At `@main` a change here would reach every consumer immediately,
+which is the drift this repository exists to prevent.
+
+Each consumer therefore holds **two independent pointers** into lean-guards:
+the submodule commit (which guard *scripts* run) and the workflow ref (which CI
+*shape* runs). They are bumped separately and may legitimately differ.
+
+The workflow takes an optional `runs-on` input (default `ubuntu-latest`) and
+requests only `contents: read`.
+
 ## Configuration
 
 `check_all.sh` sources `.guards.env` from the consuming repo's root if present.
