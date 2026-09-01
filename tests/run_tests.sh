@@ -1,0 +1,167 @@
+#!/bin/bash
+
+# Assert that each guard both rejects code it should reject and accepts code it
+# should accept. Running the guards against clean repositories only proves the
+# absence of false positives; these cases cover the other direction.
+#
+# Each case runs in a throwaway git repository, because every guard discovers
+# files through `git grep` or `git ls-files` and would otherwise scan this one.
+
+set -uo pipefail
+
+GUARDS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PASS=0
+FAIL=0
+FAILURES=()
+
+# Per-case environment for the guard under test, as NAME=VALUE entries. Set it
+# immediately before a case; both helpers clear it afterwards so it cannot leak.
+GUARD_ENV=()
+
+# Build a git repository holding a single Lean file, plus the lakefile that
+# check_import.sh reads to discover its search roots.
+make_repo() {
+    local dir="$1" path="$2" body="$3"
+    mkdir -p "$dir/$(dirname "$path")"
+    printf '%s\n' "$body" > "$dir/$path"
+    cat > "$dir/lakefile.toml" <<'LAKE'
+name = "fixture"
+
+[[lean_lib]]
+name = "Fixture"
+LAKE
+    git -C "$dir" init -q
+    git -C "$dir" add -A
+    git -C "$dir" -c user.email=t@t -c user.name=t commit -q -m fixture
+}
+
+# expect_reject <name> <guard> <expected-output-substring> <lean-path> <body>
+# The substring assertion matters: a guard that fails for an unrelated reason
+# (missing file, syntax error) still exits non-zero and would pass without it.
+expect_reject() {
+    local name="$1" guard="$2" needle="$3" path="$4" body="$5"
+    local dir out code
+    dir="$(mktemp -d)"
+    make_repo "$dir" "$path" "$body"
+    out="$(cd "$dir" && env ${GUARD_ENV[@]+"${GUARD_ENV[@]}"} "$GUARDS_DIR/$guard" 2>&1)"
+    code=$?
+    rm -rf "$dir"
+
+    if [[ $code -eq 0 ]]; then
+        FAIL=$((FAIL + 1)); FAILURES+=("$name: expected $guard to reject, but it passed")
+    elif ! grep -qF "$needle" <<< "$out"; then
+        FAIL=$((FAIL + 1)); FAILURES+=("$name: $guard rejected, but not for the expected reason (wanted \"$needle\")")
+    else
+        PASS=$((PASS + 1))
+    fi
+    GUARD_ENV=()
+}
+
+# expect_accept <name> <guard> <lean-path> <body>
+expect_accept() {
+    local name="$1" guard="$2" path="$3" body="$4"
+    local dir out code
+    dir="$(mktemp -d)"
+    make_repo "$dir" "$path" "$body"
+    out="$(cd "$dir" && env ${GUARD_ENV[@]+"${GUARD_ENV[@]}"} "$GUARDS_DIR/$guard" 2>&1)"
+    code=$?
+    rm -rf "$dir"
+
+    if [[ $code -ne 0 ]]; then
+        FAIL=$((FAIL + 1)); FAILURES+=("$name: expected $guard to accept, but it rejected:"$'\n'"$out")
+    else
+        PASS=$((PASS + 1))
+    fi
+    GUARD_ENV=()
+}
+
+# --- check_banned -----------------------------------------------------------
+
+expect_reject "banned/sorry" check_banned.sh "banned pattern" Fixture/A.lean \
+'theorem t : True := by sorry'
+
+expect_accept "banned/clean" check_banned.sh Fixture/A.lean \
+'theorem t : True := by trivial'
+
+# --- check_simp -------------------------------------------------------------
+
+expect_reject "simp/unsqueezed" check_simp.sh "unsqueezed" Fixture/A.lean \
+'theorem t : True := by simp'
+
+expect_accept "simp/squeezed" check_simp.sh Fixture/A.lean \
+'theorem t : True := by simp only [] <;> trivial'
+
+# --- check_naming -----------------------------------------------------------
+
+expect_reject "naming/snake_case def" check_naming.sh "camelCase" Fixture/A.lean \
+'def foo_bar : Nat := 0'
+
+expect_accept "naming/camelCase def" check_naming.sh Fixture/A.lean \
+'def fooBar : Nat := 0'
+
+# --- check_long_file --------------------------------------------------------
+
+LONG_BODY="$(for i in $(seq 1 40); do echo "-- filler line $i"; done)"
+
+# Drive the thresholds down rather than committing a fixture hundreds of lines
+# long. The same fixture passing under a high cap and failing under a low one
+# also shows the thresholds are honoured, not merely accepted.
+GUARD_ENV=(MAX_LEAN_FILE_LINES=20 SOFT_LEAN_FILE_MAX_LINES=15 SOFT_LEAN_FILE_MIN_LINES=1)
+expect_reject "long_file/over hard limit" check_long_file.sh "longer than hard limit" Fixture/A.lean \
+"$LONG_BODY"
+
+GUARD_ENV=(MAX_LEAN_FILE_LINES=100 SOFT_LEAN_FILE_MAX_LINES=90 SOFT_LEAN_FILE_MIN_LINES=1)
+expect_accept "long_file/under hard limit" check_long_file.sh Fixture/A.lean \
+"$LONG_BODY"
+
+# --- check_description ------------------------------------------------------
+
+expect_reject "description/missing module doc" check_description.sh "missing module doc" Fixture/A.lean \
+'theorem foo_bar : True := trivial'
+
+expect_reject "description/theorem not listed" check_description.sh "is not listed in the Theorems section" Fixture/A.lean \
+'/-!
+# Fixture
+
+## Theorems
+
+- `something_else`
+-/
+
+theorem foo_bar : True := trivial'
+
+expect_accept "description/theorem listed" check_description.sh Fixture/A.lean \
+'/-!
+# Fixture
+
+## Theorems
+
+- `foo_bar`
+-/
+
+theorem foo_bar : True := trivial'
+
+# A prime in the declaration name. The pre-fix regex stopped at the apostrophe,
+# read the documented name as `foo` and the declaration as `foo'`, and reported
+# a mismatch on a correctly documented file.
+expect_accept "description/prime identifier documented" check_description.sh Fixture/A.lean \
+"/-!
+# Fixture
+
+## Theorems
+
+- \`foo_bar'\`
+-/
+
+theorem foo_bar' : True := trivial"
+
+# --- summary ----------------------------------------------------------------
+
+echo
+if [[ $FAIL -gt 0 ]]; then
+    echo "✗ ${FAIL} failed, ${PASS} passed"
+    printf '  - %s\n' "${FAILURES[@]}"
+    exit 1
+fi
+
+echo "✓ All ${PASS} guard tests passed."

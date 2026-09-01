@@ -54,6 +54,28 @@ git add scripts && git commit -m "chore: bump lean-guards"
 The submodule is pinned to a commit, so upstream changes never reach a
 repository until that bump lands.
 
+## Tests
+
+`tests/run_tests.sh` asserts that each guard rejects code it should reject and
+accepts code it should accept:
+
+```bash
+./tests/run_tests.sh
+```
+
+Running the guards against the consuming repositories only shows they produce
+no false positives. These cases cover the other direction, which is how a guard
+silently stops catching anything. Each case builds a throwaway git repository,
+because every guard discovers files through `git grep` or `git ls-files`.
+
+A rejection case asserts on the guard's message, not just its exit code — a
+guard failing for an unrelated reason still exits non-zero.
+
+Coverage is currently `check_banned`, `check_simp`, `check_naming`,
+`check_long_file`, and `check_description`. The remaining guards
+(`check_copyright`, `check_import`, `check_proof_length`, `format_lean`) are not
+yet covered.
+
 ## Shared CI workflow
 
 `.github/workflows/lean-ci.yml` is a reusable workflow (`workflow_call`) that
