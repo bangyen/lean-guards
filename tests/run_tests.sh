@@ -18,6 +18,12 @@ FAILURES=()
 # immediately before a case; both helpers clear it afterwards so it cannot leak.
 GUARD_ENV=()
 
+CANONICAL_HEADER="/-
+Copyright (c) 2026 Bangyen Pham. All rights reserved.
+Released under Apache 2.0 license as described in the file LICENSE.
+Authors: Bangyen Pham
+-/"
+
 # Build a git repository holding a single Lean file, plus the lakefile that
 # check_import.sh reads to discover its search roots.
 make_repo() {
@@ -35,15 +41,79 @@ LAKE
     git -C "$dir" -c user.email=t@t -c user.name=t commit -q -m fixture
 }
 
+# Like make_repo, but takes alternating path/body pairs for the guards that
+# reason about a file tree rather than a single file.
+make_repo_multi() {
+    local dir="$1"; shift
+    while [[ $# -gt 0 ]]; do
+        mkdir -p "$dir/$(dirname "$1")"
+        printf '%s\n' "$2" > "$dir/$1"
+        shift 2
+    done
+    cat > "$dir/lakefile.toml" <<'LAKE'
+name = "fixture"
+
+[[lean_lib]]
+name = "Fixture"
+LAKE
+    git -C "$dir" init -q
+    git -C "$dir" add -A
+    git -C "$dir" -c user.email=t@t -c user.name=t commit -q -m fixture
+}
+
+# expect_reject_multi <name> <guard> <needle> <path> <body> [<path> <body>...]
+expect_reject_multi() {
+    local name="$1" guard="$2" needle="$3"; shift 3
+    local dir out code guard_argv
+    dir="$(mktemp -d)"
+    make_repo_multi "$dir" "$@"
+    read -r -a guard_argv <<< "$guard"
+    guard_argv[0]="$GUARDS_DIR/${guard_argv[0]}"
+    out="$(cd "$dir" && env ${GUARD_ENV[@]+"${GUARD_ENV[@]}"} "${guard_argv[@]}" 2>&1)"
+    code=$?
+    rm -rf "$dir"
+
+    if [[ $code -eq 0 ]]; then
+        FAIL=$((FAIL + 1)); FAILURES+=("$name: expected $guard to reject, but it passed")
+    elif ! grep -qF "$needle" <<< "$out"; then
+        FAIL=$((FAIL + 1)); FAILURES+=("$name: $guard rejected, but not for the expected reason (wanted \"$needle\")")
+    else
+        PASS=$((PASS + 1))
+    fi
+    GUARD_ENV=()
+}
+
+# expect_accept_multi <name> <guard> <path> <body> [<path> <body>...]
+expect_accept_multi() {
+    local name="$1" guard="$2"; shift 2
+    local dir out code guard_argv
+    dir="$(mktemp -d)"
+    make_repo_multi "$dir" "$@"
+    read -r -a guard_argv <<< "$guard"
+    guard_argv[0]="$GUARDS_DIR/${guard_argv[0]}"
+    out="$(cd "$dir" && env ${GUARD_ENV[@]+"${GUARD_ENV[@]}"} "${guard_argv[@]}" 2>&1)"
+    code=$?
+    rm -rf "$dir"
+
+    if [[ $code -ne 0 ]]; then
+        FAIL=$((FAIL + 1)); FAILURES+=("$name: expected $guard to accept, but it rejected:"$'\n'"$out")
+    else
+        PASS=$((PASS + 1))
+    fi
+    GUARD_ENV=()
+}
+
 # expect_reject <name> <guard> <expected-output-substring> <lean-path> <body>
 # The substring assertion matters: a guard that fails for an unrelated reason
 # (missing file, syntax error) still exits non-zero and would pass without it.
 expect_reject() {
     local name="$1" guard="$2" needle="$3" path="$4" body="$5"
-    local dir out code
+    local dir out code guard_argv
     dir="$(mktemp -d)"
     make_repo "$dir" "$path" "$body"
-    out="$(cd "$dir" && env ${GUARD_ENV[@]+"${GUARD_ENV[@]}"} "$GUARDS_DIR/$guard" 2>&1)"
+    read -r -a guard_argv <<< "$guard"
+    guard_argv[0]="$GUARDS_DIR/${guard_argv[0]}"
+    out="$(cd "$dir" && env ${GUARD_ENV[@]+"${GUARD_ENV[@]}"} "${guard_argv[@]}" 2>&1)"
     code=$?
     rm -rf "$dir"
 
@@ -60,10 +130,12 @@ expect_reject() {
 # expect_accept <name> <guard> <lean-path> <body>
 expect_accept() {
     local name="$1" guard="$2" path="$3" body="$4"
-    local dir out code
+    local dir out code guard_argv
     dir="$(mktemp -d)"
     make_repo "$dir" "$path" "$body"
-    out="$(cd "$dir" && env ${GUARD_ENV[@]+"${GUARD_ENV[@]}"} "$GUARDS_DIR/$guard" 2>&1)"
+    read -r -a guard_argv <<< "$guard"
+    guard_argv[0]="$GUARDS_DIR/${guard_argv[0]}"
+    out="$(cd "$dir" && env ${GUARD_ENV[@]+"${GUARD_ENV[@]}"} "${guard_argv[@]}" 2>&1)"
     code=$?
     rm -rf "$dir"
 
@@ -154,6 +226,78 @@ expect_accept "description/prime identifier documented" check_description.sh Fix
 -/
 
 theorem foo_bar' : True := trivial"
+
+# --- check_copyright --------------------------------------------------------
+
+expect_reject "copyright/missing header" check_copyright.sh "copyright header" Fixture/A.lean \
+'theorem t : True := trivial'
+
+expect_accept "copyright/canonical header" check_copyright.sh Fixture/A.lean \
+"$CANONICAL_HEADER
+
+theorem t : True := trivial"
+
+# A near-miss: right shape, wrong text. The header is compared exactly, so this
+# must still be rejected.
+expect_reject "copyright/altered header" check_copyright.sh "copyright header" Fixture/A.lean \
+'/-
+Copyright (c) 2026 Someone Else. All rights reserved.
+Released under Apache 2.0 license as described in the file LICENSE.
+Authors: Someone Else
+-/
+
+theorem t : True := trivial'
+
+# --- check_proof_length -----------------------------------------------------
+
+# Advisory by default; only a hard cap fails. Both cases set one so the check
+# has a definite outcome rather than warning either way.
+LONG_PROOF="theorem t : True := by
+$(for i in $(seq 1 12); do echo "  -- step $i"; done)
+  trivial"
+
+GUARD_ENV=(HARD_PROOF_MAX_LINES=5 SOFT_PROOF_MIN_LINES=1 SOFT_PROOF_MAX_LINES=4)
+expect_reject "proof_length/over hard cap" check_proof_length.sh "hard limit" Fixture/A.lean \
+"$LONG_PROOF"
+
+GUARD_ENV=(HARD_PROOF_MAX_LINES=50 SOFT_PROOF_MIN_LINES=1 SOFT_PROOF_MAX_LINES=40)
+expect_accept "proof_length/under hard cap" check_proof_length.sh Fixture/A.lean \
+"$LONG_PROOF"
+
+# --- format_lean ------------------------------------------------------------
+
+expect_reject "format/trailing whitespace" "format_lean.sh --check" "require formatting" Fixture/A.lean \
+'theorem t : True := trivial   '
+
+expect_reject "format/unsorted imports" "format_lean.sh --check" "require formatting" Fixture/A.lean \
+'import Fixture.Zebra
+import Fixture.Alpha
+
+theorem t : True := trivial'
+
+expect_accept "format/clean" "format_lean.sh --check" Fixture/A.lean \
+'import Fixture.Alpha
+import Fixture.Zebra
+
+theorem t : True := trivial'
+
+# --- check_import -----------------------------------------------------------
+
+# Fixture/Sub.lean is the aggregator for Fixture/Sub/; omitting the child import
+# is the violation.
+expect_reject_multi "import/aggregator missing child" check_import.sh "missing 'import Fixture.Sub.Leaf'" \
+    Fixture.lean 'import Fixture.Sub' \
+    Fixture/Sub.lean '-- aggregator with no child import' \
+    Fixture/Sub/Leaf.lean 'theorem t : True := trivial'
+
+expect_accept_multi "import/aggregator complete" check_import.sh \
+    Fixture.lean 'import Fixture.Sub' \
+    Fixture/Sub.lean 'import Fixture.Sub.Leaf' \
+    Fixture/Sub/Leaf.lean 'theorem t : True := trivial'
+
+expect_reject_multi "import/aggregator absent" check_import.sh "Missing aggregator file" \
+    Fixture.lean 'import Fixture.Sub.Leaf' \
+    Fixture/Sub/Leaf.lean 'theorem t : True := trivial'
 
 # --- summary ----------------------------------------------------------------
 
