@@ -173,6 +173,29 @@ expect_config() {
     fi
 }
 
+# Like expect_config, but also writes a LICENSE file, so the cross-checks
+# between .guards.env and LICENSE have something to compare against.
+expect_config_licensed() {
+    local name="$1" outcome="$2" needle="$3" license_body="$4" body="$5"
+    local dir out code
+    dir="$(mktemp -d)"
+    printf '%s\n' "$license_body" > "$dir/LICENSE"
+    printf '%s\n' "$body" > "$dir/.guards.env"
+    out="$(cd "$dir" && "$GUARDS_DIR/check_config.sh" 2>&1)"
+    code=$?
+    rm -rf "$dir"
+
+    if [[ "$outcome" == reject && $code -eq 0 ]]; then
+        FAIL=$((FAIL + 1)); FAILURES+=("$name: expected check_config.sh to reject, but it passed")
+    elif [[ "$outcome" == reject ]] && ! grep -qF "$needle" <<< "$out"; then
+        FAIL=$((FAIL + 1)); FAILURES+=("$name: check_config.sh rejected, but not for the expected reason (wanted \"$needle\")")
+    elif [[ "$outcome" == accept && $code -ne 0 ]]; then
+        FAIL=$((FAIL + 1)); FAILURES+=("$name: expected check_config.sh to accept, but it rejected:"$'\n'"$out")
+    else
+        PASS=$((PASS + 1))
+    fi
+}
+
 # --- check_banned -----------------------------------------------------------
 
 expect_reject "banned/sorry" check_banned.sh "banned pattern" Fixture/A.lean \
@@ -395,7 +418,7 @@ theorem t : True := trivial"
 # --- check_config: non-integer settings --------------------------------------
 
 expect_config "config/copyright settings valid" accept "" \
-'COPYRIGHT_HOLDER=Ada Lovelace
+'COPYRIGHT_HOLDER="Ada Lovelace"
 COPYRIGHT_YEAR=2030'
 
 expect_config "config/bad copyright year" reject "four-digit year" \
@@ -408,6 +431,37 @@ expect_config "config/empty holder" reject "must not be empty" \
 # indistinguishable from a clean repository.
 expect_config "config/nonexistent search root" reject "not a directory" \
 'LEAN_SEARCH_ROOTS=NoSuchDir'
+
+# --- check_config: agreement with LICENSE ------------------------------------
+
+MIT_LICENSE='MIT License
+
+Copyright (c) 2026 Bangyen Pham'
+
+APACHE_LICENSE='                                 Apache License
+                           Version 2.0, January 2004
+
+   Copyright 2026 Bangyen Pham'
+
+# The drift this catches: two repositories carried Apache headers under an MIT
+# LICENSE, and nothing noticed because the guard hardcoded the license.
+expect_config_licensed "config/license disagrees with LICENSE" reject "does not look like a" \
+"$MIT_LICENSE" 'COPYRIGHT_LICENSE="Apache 2.0"'
+
+expect_config_licensed "config/license agrees with LICENSE" accept "" \
+"$MIT_LICENSE" 'COPYRIGHT_LICENSE=MIT'
+
+expect_config_licensed "config/apache agrees with LICENSE" accept "" \
+"$APACHE_LICENSE" 'COPYRIGHT_LICENSE="Apache 2.0"'
+
+expect_config_licensed "config/holder absent from LICENSE" reject "does not appear in LICENSE" \
+"$MIT_LICENSE" 'COPYRIGHT_LICENSE=MIT
+COPYRIGHT_HOLDER="Ada Lovelace"'
+
+# An unquoted two-word value makes `source` run the second word as a command and
+# leaves the variable empty, so the guard silently falls back to its default.
+expect_config "config/unquoted value with spaces" reject "must be quoted" \
+'COPYRIGHT_HOLDER=Ada Lovelace'
 
 # --- summary ----------------------------------------------------------------
 

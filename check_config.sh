@@ -74,6 +74,16 @@ while IFS= read -r line || [[ -n "$line" ]]; do
         continue
     fi
 
+    # An unquoted value containing spaces makes `source` try to run the second
+    # word as a command, leaving the variable empty and the guard on defaults.
+    if [[ "$value" == *[[:space:]]* && ! "$value" =~ ^\".*\"$ && ! "$value" =~ ^\'.*\'$ ]]; then
+        raw_value="${line#*=}"
+        if [[ ! "$raw_value" =~ ^[[:space:]]*[\"\'] ]]; then
+            MATCHES+=("${CONFIG_FILE}:${lineno}: ${name} contains spaces and must be quoted: ${name}=\"${value}\"")
+            continue
+        fi
+    fi
+
     if contains "$name" "${INTEGER_VARS[@]}" && ! [[ "$value" =~ ^[0-9]+$ ]]; then
         MATCHES+=("${CONFIG_FILE}:${lineno}: ${name} must be a non-negative integer, got '${value}'")
     fi
@@ -127,6 +137,30 @@ if [[ ${#MATCHES[@]} -eq 0 ]]; then
     fi
     if [[ "$soft_proof_min" -gt "$soft_proof_max" ]]; then
         MATCHES+=("SOFT_PROOF_MIN_LINES (${soft_proof_min}) must not exceed SOFT_PROOF_MAX_LINES (${soft_proof_max})")
+    fi
+fi
+
+# The Lean headers and the LICENSE file are two copies of the same fact, and
+# they had already drifted: two repositories carried Apache headers under an MIT
+# LICENSE. Checking them against each other is the only thing that keeps them
+# honest, since neither side can notice the other changing.
+if [[ ${#MATCHES[@]} -eq 0 && -f LICENSE ]]; then
+    license_name="${COPYRIGHT_LICENSE:-Apache 2.0}"
+    case "$license_name" in
+        "Apache 2.0"|Apache-2.0) license_pattern="Apache License" ;;
+        MIT) license_pattern="MIT License" ;;
+        *)  license_pattern="" ;;
+    esac
+
+    if [[ -n "$license_pattern" ]] && ! grep -qF "$license_pattern" LICENSE; then
+        MATCHES+=("COPYRIGHT_LICENSE is '${license_name}', but LICENSE does not look like a ${license_pattern}")
+    fi
+
+    holder="${COPYRIGHT_HOLDER:-Bangyen Pham}"
+    if [[ -z "${holder//[[:space:]]/}" ]]; then
+        MATCHES+=("COPYRIGHT_HOLDER resolved to an empty value; check that it is quoted in ${CONFIG_FILE}")
+    elif ! grep -qF "$holder" LICENSE; then
+        MATCHES+=("COPYRIGHT_HOLDER is '${holder}', but that name does not appear in LICENSE")
     fi
 fi
 

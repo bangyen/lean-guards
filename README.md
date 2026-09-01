@@ -123,6 +123,12 @@ requests only `contents: read`.
 | `COPYRIGHT_HOLDER` | Bangyen Pham | Name in the copyright and Authors lines |
 | `COPYRIGHT_YEAR` | 2026 | Year in the copyright line |
 | `COPYRIGHT_LICENSE` | Apache 2.0 | License phrase in the header |
+
+`check_config` cross-checks `COPYRIGHT_LICENSE` and `COPYRIGHT_HOLDER` against
+the repository's `LICENSE` file, since the Lean headers and that file are two
+copies of the same fact and neither can notice the other changing. Values
+containing spaces must be quoted — unquoted, `source` runs the second word as a
+command and leaves the setting empty.
 | `MAX_LEAN_FILE_LINES` | 250 | Hard file-length cap (fails) |
 | `SOFT_LEAN_FILE_MAX_LINES` | 200 | Advisory file-length cap (warns) |
 | `SOFT_LEAN_FILE_MIN_LINES` | 25 | Advisory file-length floor (warns) |
